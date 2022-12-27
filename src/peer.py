@@ -31,9 +31,8 @@ def process_download(sock,chunkfile, outputfile):
 def process_inbound_udp(sock):
     # Receive pkt
     pkt, from_addr = sock.recvfrom(BUF_SIZE)
-    Magic, Team, Type,hlen, plen, Seq, Ack= struct.unpack("HBBHHII", pkt[:HEADER_LEN])
+    Magic, Team, Type,hlen, plen, Seq, Ack= struct.unpack("!HBBHHII", pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
-    print("SKELETON CODE CALLED, FILL this!")
 
 def process_user_input(sock):
     command, chunkf, outf = input().split(' ')
