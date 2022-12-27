@@ -27,6 +27,8 @@ ex_received_chunk = dict()
 ex_downloading_chunkhash = ""
 ex_sending_chunkhash = ""
 
+ack_records = dict()
+data_info = dict()
 
 def process_download(sock, chunkfile, outputfile):
     '''
@@ -162,6 +164,19 @@ def process_user_input(sock):
         process_download(sock, chunkf, outf)
     else:
         pass
+
+
+class Ack_Record:
+    def __init__(self):
+        self.ack = 0
+        self.sending_chunk_hash = ''
+        self.sending_time = dict()
+
+class Data_Info:
+    def __int__(self):
+        self.received_chunk = b''
+        self.downloading_chunk_hash = ''
+
 
 
 def peer_run(config):
