@@ -139,6 +139,9 @@ def timeout_retransmission(sock: simsocket.SimSocket):
         record = ack_records[addr]
         for seq in record.sending_time:
             if time() - record.sending_time[seq] > record.timeout_interval:
+                record.ssthresh = max(math.floor(record.cwnd / 2), 2)
+                record.cwnd = 1
+                record.mode = 0
                 send_data(sock, addr, seq)
 
 
@@ -173,8 +176,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         if record.duplicated_ack == 3:
             record.ssthresh = max(math.floor(record.cwnd / 2), 2)
             record.cwnd = 1
-            if record.mode == 1:
-                record.mode = 0
+            record.mode = 0
             send_data(sock, addr, record.ack + 1)
 
 
