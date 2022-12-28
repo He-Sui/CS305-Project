@@ -81,7 +81,7 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             del record.buffer[record.ack]
         if len(record.received_chunk) == CHUNK_DATA_SIZE:
             with open(config.output_file, "wb") as wf:
-                pickle.dump(config.output_file, wf)
+                pickle.dump(record.received_chunk, wf)
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
     pkt = struct.pack(FORMAT, 52305, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
