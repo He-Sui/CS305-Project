@@ -4,11 +4,13 @@ import select
 import util.simsocket as simsocket
 import struct
 import socket
+import math
 import util.bt_utils as bt_utils
 import hashlib
 import argparse
 import pickle
 from typing import Dict, Set, Tuple
+from time import time
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -18,6 +20,8 @@ FORMAT = '!HBBHHII'
 HEADER_LEN = struct.calcsize(FORMAT)
 MAX_PAYLOAD = 1024
 TEAM = 15
+ALPHA = 0.125
+BETA = 0.25
 
 config = None
 
@@ -28,7 +32,15 @@ class Ack_Record:
         self.sending_chunk_hash = ''
         self.sending_time = dict()
         self.ack_packet = set()
-        self.window_size = 0
+        self.cwnd = 1.0
+        self.ssthresh = 64
+        self.mode = 0
+        self.duplicated_ack = 0
+        self.estimated_RTT = None
+        self.dev_RTT = None
+        self.timeout_interval = None
+        self.transfer_num: Dict[int, int] = dict()
+        self.next_seq_num = 1
 
 
 class Data_Info:
@@ -65,7 +77,7 @@ def process_inbound_udp(sock):
     elif type == 3:
         process_data(sock, from_addr, data, Seq)
     elif type == 4:
-        pass
+        process_ack(sock, from_addr, Seq, Ack)
     elif type == 5:
         pass
 
@@ -85,6 +97,64 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
     pkt = struct.pack(FORMAT, 52305, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
+
+
+def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
+    left = (seq - 1) * MAX_PAYLOAD
+    right = min(seq * MAX_PAYLOAD, CHUNK_DATA_SIZE)
+    if left >= right:
+        return
+    next_data = config.haschunks[ack_records[addr].sending_chunk_hash][left:right]
+    data_header = struct.pack(FORMAT, 52305, TEAM, 3, HEADER_LEN, HEADER_LEN + len(next_data), seq, 0)
+    ack_records[addr].sending_time[seq] = time()
+    if ack_records[addr].transfer_num.get(seq) is None:
+        ack_records[addr].transfer_num[seq] = 0
+    ack_records[addr].transfer_num[seq] += 1
+    sock.sendto(data_header + next_data, addr)
+
+
+def timeout_retransmission(sock: simsocket.SimSocket):
+    for addr in ack_records:
+        record = ack_records[addr]
+        for seq in record.sending_time:
+            if time() - record.sending_time[seq] > record.timeout_interval:
+                send_data(sock, addr, seq)
+
+
+def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
+    record = ack_records.get(addr)
+    if record.ack * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
+        return
+    record.ack_packet.add(seq)
+    if record.transfer_num[seq] == 1:
+        sample_rtt = time() - record.sending_time[seq]
+        record.estimated_RTT = (1 - ALPHA) * record.estimated_RTT + ALPHA * sample_rtt
+        record.dev_RTT = (1 - BETA) * record.dev_RTT + BETA * abs(sample_rtt - record.estimated_RTT)
+        record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+    if seq in record.sending_time:
+        del record.sending_time[seq]
+    if ack > record.ack:
+        record.ack = ack
+        record.duplicated_ack = 1
+        if record.mode == 0:
+            record.cwnd += 1
+            if record.mode >= record.ssthresh:
+                record.mode = 1
+        else:
+            record.cwnd += 1 / record.cwnd
+        for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
+            if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
+                break
+            record.next_seq_num += 1
+            send_data(sock, addr, i)
+    elif ack == record.ack:
+        record.duplicated_ack += 1
+        if record.duplicated_ack == 3:
+            record.ssthresh = max(math.floor(record.cwnd / 2), 2)
+            record.cwnd = 1
+            if record.mode == 1:
+                record.mode = 0
+            send_data(sock, addr, record.ack + 1)
 
 
 def process_user_input(sock):
