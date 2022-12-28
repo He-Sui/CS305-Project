@@ -54,6 +54,7 @@ class Data_Info:
 
 ack_records: Dict[tuple, Ack_Record] = dict()
 data_info: Dict[tuple, Data_Info] = dict()
+handshake_time: Dict[tuple, float] = dict()
 
 
 def process_download(sock, chunkfile, outputfile):
@@ -69,11 +70,31 @@ def process_inbound_udp(sock):
     Magic, Team, Type, hlen, plen, Seq, Ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
     if type == 0:
+        # TODO handle the WHOHAS pkt
+
+        # If send back IHAVE pkt, then
+        handshake_time[from_addr] = time()
         pass
     elif type == 1:
+        # TODO handle the IHAVE pkt
+
+        # If choose to send GET pkt, then
+        record = Data_Info()
+        chunk_hash = data[:20].decode()
+        record.downloading_chunk_hash = chunk_hash
+        data_info[from_addr] = record
         pass
     elif type == 2:
-        pass
+        record = Ack_Record()
+        sending_chunk_hash = data[:20].decode()
+        ack_records[from_addr].sending_chunk_hash = sending_chunk_hash
+        sample_rtt = time() - handshake_time[from_addr]
+        record.estimated_RTT = sample_rtt
+        record.dev_RTT = abs(sample_rtt - record.estimated_RTT)
+        record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        ack_records[from_addr] = record
+        send_data(sock, from_addr, 1)
+        record.next_seq_num = 2
     elif type == 3:
         process_data(sock, from_addr, data, Seq)
     elif type == 4:
@@ -181,6 +202,7 @@ def peer_run(config):
             else:
                 # No pkt nor input arrives during this period 
                 pass
+            timeout_retransmission(sock)
     except KeyboardInterrupt:
         pass
     finally:
