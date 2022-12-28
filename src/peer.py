@@ -8,20 +8,43 @@ import util.bt_utils as bt_utils
 import hashlib
 import argparse
 import pickle
+from typing import Dict, Set, Tuple
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 BUF_SIZE = 1400
 CHUNK_DATA_SIZE = 512 * 1024
-HEADER_LEN = struct.calcsize("HBBHHII")
+FORMAT = '!HBBHHII'
+HEADER_LEN = struct.calcsize(FORMAT)
 MAX_PAYLOAD = 1024
+TEAM = 15
 
 config = None
 
-ack_records = dict()
-data_info = dict()
 
-def process_download(sock,chunkfile, outputfile):
+class Ack_Record:
+    def __init__(self):
+        self.ack = 0
+        self.sending_chunk_hash = ''
+        self.sending_time = dict()
+        self.ack_packet = set()
+        self.window_size = 0
+
+
+class Data_Info:
+    def __int__(self):
+        self.received_chunk = b''
+        self.buffer = dict()
+        self.ack = 0
+        self.received_pkt = set()
+        self.downloading_chunk_hash = ''
+
+
+ack_records: Dict[tuple, Ack_Record] = dict()
+data_info: Dict[tuple, Data_Info] = dict()
+
+
+def process_download(sock, chunkfile, outputfile):
     '''
     if DOWNLOAD is used, the peer will keep getting files until it is done
     '''
@@ -31,28 +54,45 @@ def process_download(sock,chunkfile, outputfile):
 def process_inbound_udp(sock):
     # Receive pkt
     pkt, from_addr = sock.recvfrom(BUF_SIZE)
-    Magic, Team, Type,hlen, plen, Seq, Ack= struct.unpack("!HBBHHII", pkt[:HEADER_LEN])
+    Magic, Team, Type, hlen, plen, Seq, Ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
+    if type == 0:
+        pass
+    elif type == 1:
+        pass
+    elif type == 2:
+        pass
+    elif type == 3:
+        process_data(sock, from_addr, data, Seq)
+    elif type == 4:
+        pass
+    elif type == 5:
+        pass
+
+
+def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
+    record = data_info[addr]
+    if seq not in record.received_pkt:
+        record.buffer[seq] = data
+        record.received_pkt.add(seq)
+        while record.ack + 1 in record.received_pkt:
+            record.ack += 1
+            record.received_chunk += record.buffer[record.ack]
+            del record.buffer[record.ack]
+        if len(record.received_chunk) == CHUNK_DATA_SIZE:
+            with open(config.output_file, "wb") as wf:
+                pickle.dump(config.output_file, wf)
+            config.haschunks[record.downloading_chunk_hash] = record.received_chunk
+    pkt = struct.pack(FORMAT, 52305, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
+    sock.sendto(pkt, addr)
+
 
 def process_user_input(sock):
     command, chunkf, outf = input().split(' ')
     if command == 'DOWNLOAD':
-        process_download(sock ,chunkf, outf)
+        process_download(sock, chunkf, outf)
     else:
         pass
-
-
-class Ack_Record:
-    def __init__(self):
-        self.ack = 0
-        self.sending_chunk_hash = ''
-        self.sending_time = dict()
-
-class Data_Info:
-    def __int__(self):
-        self.received_chunk = b''
-        self.downloading_chunk_hash = ''
-
 
 
 def peer_run(config):
