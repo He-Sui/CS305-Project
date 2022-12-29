@@ -19,6 +19,7 @@ CHUNK_DATA_SIZE = 512 * 1024
 FORMAT = '!HBBHHII'
 HEADER_LEN = struct.calcsize(FORMAT)
 MAX_PAYLOAD = 1024
+MAGIC = 52305
 TEAM = 15
 ALPHA = 0.125
 BETA = 0.25
@@ -58,24 +59,24 @@ handshake_time: Dict[tuple, float] = dict()
 
 
 def process_download(sock, chunkfile, outputfile):
-    '''
+    """
     if DOWNLOAD is used, the peer will keep getting files until it is done
-    '''
+    """
     print('PROCESS DOWNLOAD SKELETON CODE CALLED.  Fill me in!')
 
 
 def process_inbound_udp(sock):
     # Receive pkt
     pkt, from_addr = sock.recvfrom(BUF_SIZE)
-    Magic, Team, Type, hlen, plen, Seq, Ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
+    magic, team, type_code, hlen, plen, seq, ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
-    if type == 0:
+    if type_code == 0:
         # TODO handle the WHOHAS pkt
 
         # If send back IHAVE pkt, then
         handshake_time[from_addr] = time()
         pass
-    elif type == 1:
+    elif type_code == 1:
         # TODO handle the IHAVE pkt
 
         # If choose to send GET pkt, then
@@ -84,7 +85,7 @@ def process_inbound_udp(sock):
         record.downloading_chunk_hash = chunk_hash
         data_info[from_addr] = record
         pass
-    elif type == 2:
+    elif type_code == 2:
         record = Ack_Record()
         sending_chunk_hash = data[:20].decode()
         ack_records[from_addr].sending_chunk_hash = sending_chunk_hash
@@ -95,12 +96,10 @@ def process_inbound_udp(sock):
         ack_records[from_addr] = record
         send_data(sock, from_addr, 1)
         record.next_seq_num = 2
-    elif type == 3:
-        process_data(sock, from_addr, data, Seq)
-    elif type == 4:
-        process_ack(sock, from_addr, Seq, Ack)
-    elif type == 5:
-        pass
+    elif type_code == 3:
+        process_data(sock, from_addr, data, seq)
+    elif type_code == 4:
+        process_ack(sock, from_addr, seq, ack)
 
 
 def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
@@ -116,7 +115,7 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             with open(config.output_file, "wb") as wf:
                 pickle.dump(record.received_chunk, wf)
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
-    pkt = struct.pack(FORMAT, 52305, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
+    pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
 
 
@@ -126,7 +125,7 @@ def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
     if left >= right:
         return
     next_data = config.haschunks[ack_records[addr].sending_chunk_hash][left:right]
-    data_header = struct.pack(FORMAT, 52305, TEAM, 3, HEADER_LEN, HEADER_LEN + len(next_data), seq, 0)
+    data_header = struct.pack(FORMAT, MAGIC, TEAM, 3, HEADER_LEN, HEADER_LEN + len(next_data), seq, 0)
     ack_records[addr].sending_time[seq] = time()
     if ack_records[addr].transfer_num.get(seq) is None:
         ack_records[addr].transfer_num[seq] = 0
