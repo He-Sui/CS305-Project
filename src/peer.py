@@ -56,13 +56,25 @@ class Data_Info:
 ack_records: Dict[tuple, Ack_Record] = dict()
 data_info: Dict[tuple, Data_Info] = dict()
 handshake_time: Dict[tuple, float] = dict()
+required_hash = set()
 
 
 def process_download(sock, chunkfile, outputfile):
-    """
-    if DOWNLOAD is used, the peer will keep getting files until it is done
-    """
-    print('PROCESS DOWNLOAD SKELETON CODE CALLED.  Fill me in!')
+    config.output_file = outputfile
+    with open(chunkfile, 'r') as cf:
+        while True:
+            line = cf.readline().strip()
+            if not line:
+                break
+            _, hash_str = line.split(" ")
+            required_hash.add(hash_str)
+    peer_list = config.peers
+    for hash_str in required_hash:
+        whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
+        whohas_pkt = whohas_header + hash_str.encode()
+        for p in peer_list:
+            if int(p[0]) != config.identity:
+                sock.sendto(whohas_pkt, (p[1], int(p[2])))
 
 
 def process_inbound_udp(sock):
@@ -71,16 +83,10 @@ def process_inbound_udp(sock):
     magic, team, type_code, hlen, plen, seq, ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
     if type_code == 0:
-        whohas_chunk_hash = data[:20]
-        chunkhash = whohas_chunk_hash.decode()
-        if len(ack_records) >= config.max_conn:
-            denied_pkt = struct.pack(FORMAT, MAGIC, TEAM, 5, HEADER_LEN, HEADER_LEN, 0, 0)
-            sock.sendto(denied_pkt, from_addr)
-            return
-        # 这里的SEQ和ACK该是多少？
-        if chunkhash in config.haschunks:
-            ihave_header = struct.pack(FORMAT, MAGIC, TEAM, 1, HEADER_LEN, HEADER_LEN + len(whohas_chunk_hash), 0, 0)
-            ihave_pkt = ihave_header + whohas_chunk_hash
+        chunk_hash = data[:20].decode()
+        if chunk_hash in config.haschunks:
+            ihave_header = struct.pack(FORMAT, MAGIC, TEAM, 1, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
+            ihave_pkt = ihave_header + chunk_hash.encode()
             sock.sendto(ihave_pkt, from_addr)
             handshake_time[from_addr] = time()
     elif type_code == 1:
@@ -107,6 +113,8 @@ def process_inbound_udp(sock):
         process_data(sock, from_addr, data, seq)
     elif type_code == 4:
         process_ack(sock, from_addr, seq, ack)
+    elif type_code == 5:
+        pass
 
 
 def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
