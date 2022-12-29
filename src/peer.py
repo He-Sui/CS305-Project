@@ -71,11 +71,18 @@ def process_inbound_udp(sock):
     magic, team, type_code, hlen, plen, seq, ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
     if type_code == 0:
-        # TODO handle the WHOHAS pkt
-
-        # If send back IHAVE pkt, then
-        handshake_time[from_addr] = time()
-        pass
+        whohas_chunk_hash = data[:20]
+        chunkhash = whohas_chunk_hash.decode()
+        if len(ack_records) >= config.max_conn:
+            denied_pkt = struct.pack(FORMAT, MAGIC, TEAM, 5, HEADER_LEN, HEADER_LEN, 0, 0)
+            sock.sendto(denied_pkt, from_addr)
+            return
+        # 这里的SEQ和ACK该是多少？
+        if chunkhash in config.haschunks:
+            ihave_header = struct.pack(FORMAT, MAGIC, TEAM, 1, HEADER_LEN, HEADER_LEN + len(whohas_chunk_hash), 0, 0)
+            ihave_pkt = ihave_header + whohas_chunk_hash
+            sock.sendto(ihave_pkt, from_addr)
+            handshake_time[from_addr] = time()
     elif type_code == 1:
         # TODO handle the IHAVE pkt
 
@@ -147,6 +154,7 @@ def timeout_retransmission(sock: simsocket.SimSocket):
 def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
     record = ack_records.get(addr)
     if record.ack * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
+        ack_records.pop(addr)
         return
     record.ack_packet.add(seq)
     if record.transfer_num[seq] == 1:
