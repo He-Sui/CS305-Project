@@ -1,5 +1,6 @@
 import sys
 import os
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import select
 import util.simsocket as simsocket
 import struct
@@ -11,8 +12,8 @@ import argparse
 import pickle
 from typing import Dict, Set, Tuple
 from time import time
+from collections import deque
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 BUF_SIZE = 1400
 CHUNK_DATA_SIZE = 512 * 1024
@@ -45,7 +46,7 @@ class Ack_Record:
 
 
 class Data_Info:
-    def __int__(self):
+    def __init__(self):
         self.received_chunk = b''
         self.buffer = dict()
         self.ack = 0
@@ -56,7 +57,9 @@ class Data_Info:
 ack_records: Dict[tuple, Ack_Record] = dict()
 data_info: Dict[tuple, Data_Info] = dict()
 handshake_time: Dict[tuple, float] = dict()
+hash_peer_list: Dict[str, deque] = dict()
 required_hash = set()
+unfetch_hash = set()
 
 
 def process_download(sock, chunkfile, outputfile):
@@ -68,6 +71,7 @@ def process_download(sock, chunkfile, outputfile):
                 break
             _, hash_str = line.split(" ")
             required_hash.add(hash_str)
+            unfetch_hash.add(hash_str)
     peer_list = config.peers
     for hash_str in required_hash:
         whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
@@ -83,25 +87,25 @@ def process_inbound_udp(sock):
     magic, team, type_code, hlen, plen, seq, ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
     data = pkt[HEADER_LEN:]
     if type_code == 0:
-        chunk_hash = data[:20].decode()
+        chunk_hash = data.decode()
         if chunk_hash in config.haschunks:
             ihave_header = struct.pack(FORMAT, MAGIC, TEAM, 1, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
             ihave_pkt = ihave_header + chunk_hash.encode()
             sock.sendto(ihave_pkt, from_addr)
             handshake_time[from_addr] = time()
     elif type_code == 1:
-        # TODO handle the IHAVE pkt
-
-        # If choose to send GET pkt, then
-        record = Data_Info()
-        chunk_hash = data[:20].decode()
-        record.downloading_chunk_hash = chunk_hash
-        data_info[from_addr] = record
-        pass
+        chunk_hash = data.decode()
+        if chunk_hash not in hash_peer_list:
+            hash_peer_list[chunk_hash] = deque()
+        hash_peer_list[chunk_hash].append(from_addr)
     elif type_code == 2:
+        sending_chunk_hash = data.decode()
+        if len(ack_records) >= config.max_conn:
+            denied_header = struct.pack(FORMAT, MAGIC, TEAM, 5, HEADER_LEN, HEADER_LEN + len(sending_chunk_hash), 0, 0)
+            sock.sendto(denied_header + sending_chunk_hash.encode(), from_addr)
+            return
         record = Ack_Record()
-        sending_chunk_hash = data[:20].decode()
-        ack_records[from_addr].sending_chunk_hash = sending_chunk_hash
+        record.sending_chunk_hash = sending_chunk_hash
         sample_rtt = time() - handshake_time[from_addr]
         record.estimated_RTT = sample_rtt
         record.dev_RTT = abs(sample_rtt - record.estimated_RTT)
@@ -114,7 +118,12 @@ def process_inbound_udp(sock):
     elif type_code == 4:
         process_ack(sock, from_addr, seq, ack)
     elif type_code == 5:
-        pass
+        chunk_hash = data.decode()
+        if chunk_hash in hash_peer_list:
+            hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
+            unfetch_hash.add(chunk_hash)
+            if from_addr in data_info:
+                del data_info[from_addr]
 
 
 def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
@@ -132,6 +141,21 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
     pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
+
+
+def send_get(sock: simsocket.SimSocket):
+    for chunk_hash in required_hash:
+        if chunk_hash in unfetch_hash:
+            if hash_peer_list.get(chunk_hash) is not None and len(hash_peer_list[chunk_hash]) > 0:
+                addr = hash_peer_list[chunk_hash][0]
+                if addr in data_info:
+                    hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
+                    continue
+                get_header = struct.pack(FORMAT, MAGIC, TEAM, 2, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
+                sock.sendto(get_header + chunk_hash.encode(), addr)
+                data_info[addr] = Data_Info()
+                data_info[addr].downloading_chunk_hash = chunk_hash
+                unfetch_hash.remove(chunk_hash)
 
 
 def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
@@ -161,6 +185,8 @@ def timeout_retransmission(sock: simsocket.SimSocket):
 
 def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
     record = ack_records.get(addr)
+    if record is None:
+        return
     if record.ack * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
         ack_records.pop(addr)
         return
@@ -220,6 +246,7 @@ def peer_run(config):
                 # No pkt nor input arrives during this period 
                 pass
             timeout_retransmission(sock)
+            send_get(sock)
     except KeyboardInterrupt:
         pass
     finally:
@@ -246,4 +273,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     config = bt_utils.BtConfig(args)
+    # print(config.haschunks.keys())
     peer_run(config)
