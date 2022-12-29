@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import select
 import util.simsocket as simsocket
@@ -13,7 +14,6 @@ import pickle
 from typing import Dict, Set, Tuple
 from time import time
 from collections import deque
-
 
 BUF_SIZE = 1400
 CHUNK_DATA_SIZE = 512 * 1024
@@ -48,7 +48,7 @@ class Ack_Record:
 class Data_Info:
     def __init__(self):
         self.received_chunk = b''
-        self.buffer = dict()
+        self.buffer: Dict[int, bytes] = dict()
         self.ack = 0
         self.received_pkt = set()
         self.downloading_chunk_hash = ''
@@ -136,9 +136,9 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             record.received_chunk += record.buffer[record.ack]
             del record.buffer[record.ack]
         if len(record.received_chunk) == CHUNK_DATA_SIZE:
-            with open(config.output_file, "wb") as wf:
-                pickle.dump(record.received_chunk, wf)
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
+            with open(config.output_file, "wb") as wf:
+                pickle.dump(config.haschunks, wf)
     pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
 
