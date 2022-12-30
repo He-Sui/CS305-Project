@@ -109,7 +109,10 @@ def process_inbound_udp(sock):
         sample_rtt = time() - handshake_time[from_addr]
         record.estimated_RTT = sample_rtt
         record.dev_RTT = abs(sample_rtt - record.estimated_RTT)
-        record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        if config.timeout == 0:
+            record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        else:
+            record.timeout_interval = config.timeout
         ack_records[from_addr] = record
         send_data(sock, from_addr, 1)
         record.next_seq_num = 2
@@ -175,8 +178,10 @@ def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
 def timeout_retransmission(sock: simsocket.SimSocket):
     for addr in ack_records:
         record = ack_records[addr]
-        for seq in record.sending_time:
-            if time() - record.sending_time[seq] > record.timeout_interval:
+        for seq in list(record.sending_time.keys()):
+            if seq <= record.ack:
+                del record.sending_time[seq]
+            elif time() - record.sending_time[seq] > record.timeout_interval:
                 record.ssthresh = max(math.floor(record.cwnd / 2), 2)
                 record.cwnd = 1
                 record.mode = 0
@@ -195,12 +200,14 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         sample_rtt = time() - record.sending_time[seq]
         record.estimated_RTT = (1 - ALPHA) * record.estimated_RTT + ALPHA * sample_rtt
         record.dev_RTT = (1 - BETA) * record.dev_RTT + BETA * abs(sample_rtt - record.estimated_RTT)
-        record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        if config.timeout == 0:
+            record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        print(record.timeout_interval)
     if seq in record.sending_time:
         del record.sending_time[seq]
     if ack > record.ack:
         record.ack = ack
-        record.duplicated_ack = 1
+        record.duplicated_ack = 0
         if record.mode == 0:
             record.cwnd += 1
             if record.mode >= record.ssthresh:
@@ -273,5 +280,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     config = bt_utils.BtConfig(args)
-    # print(config.haschunks.keys())
     peer_run(config)
