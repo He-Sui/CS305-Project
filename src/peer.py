@@ -147,18 +147,17 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
 
 
 def send_get(sock: simsocket.SimSocket):
-    for chunk_hash in required_hash:
-        if chunk_hash in unfetch_hash:
-            if hash_peer_list.get(chunk_hash) is not None and len(hash_peer_list[chunk_hash]) > 0:
-                addr = hash_peer_list[chunk_hash][0]
-                if addr in data_info:
-                    hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
-                    continue
-                get_header = struct.pack(FORMAT, MAGIC, TEAM, 2, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
-                sock.sendto(get_header + chunk_hash.encode(), addr)
-                data_info[addr] = Data_Info()
-                data_info[addr].downloading_chunk_hash = chunk_hash
-                unfetch_hash.remove(chunk_hash)
+    for chunk_hash in list(unfetch_hash):
+        if hash_peer_list.get(chunk_hash) is not None and len(hash_peer_list[chunk_hash]) > 0:
+            addr = hash_peer_list[chunk_hash][0]
+            if addr in data_info:
+                hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
+                continue
+            get_header = struct.pack(FORMAT, MAGIC, TEAM, 2, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
+            sock.sendto(get_header + chunk_hash.encode(), addr)
+            data_info[addr] = Data_Info()
+            data_info[addr].downloading_chunk_hash = chunk_hash
+            unfetch_hash.remove(chunk_hash)
 
 
 def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
@@ -202,7 +201,6 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         record.dev_RTT = (1 - BETA) * record.dev_RTT + BETA * abs(sample_rtt - record.estimated_RTT)
         if config.timeout == 0:
             record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
-        print(record.timeout_interval)
     if seq in record.sending_time:
         del record.sending_time[seq]
     if ack > record.ack:
