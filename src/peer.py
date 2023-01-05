@@ -28,19 +28,36 @@ BETA = 0.25
 config = None
 
 
+class RTT_Info:
+    def __init__(self):
+        self.estimated_rtt = None
+        self.dev_rtt = None
+        self.timeout_interval = None
+
+    def update_info(self, sample_rtt):
+        if self.estimated_rtt is None:
+            self.estimated_rtt = sample_rtt
+            self.dev_rtt = 0
+            if config.timeout is None:
+                self.timeout_interval = 2 * self.estimated_rtt
+        else:
+            self.estimated_rtt = (1 - ALPHA) * self.estimated_rtt + ALPHA * sample_rtt
+            self.dev_rtt = (1 - BETA) * self.dev_rtt + BETA * abs(sample_rtt - self.estimated_rtt)
+            if config.timeout is None:
+                self.timeout_interval = self.estimated_rtt + 4 * self.dev_rtt
+
+
 class Ack_Record:
     def __init__(self):
         self.ack = 0
         self.sending_chunk_hash = ''
         self.sending_time = dict()
+        self.max_seq = 0
         self.ack_packet = set()
         self.cwnd = 1.0
         self.ssthresh = 64
         self.mode = 0
         self.duplicated_ack = 0
-        self.estimated_RTT = None
-        self.dev_RTT = None
-        self.timeout_interval = None
         self.transfer_num: Dict[int, int] = dict()
         self.next_seq_num = 1
 
@@ -52,13 +69,13 @@ class Data_Info:
         self.ack = 0
         self.received_pkt = set()
         self.downloading_chunk_hash = ''
+        self.last_receive_time = None
 
 
 ack_records: Dict[tuple, Ack_Record] = dict()
 data_info: Dict[tuple, Data_Info] = dict()
-handshake_time: Dict[tuple, float] = dict()
 hash_peer_list: Dict[str, deque] = dict()
-required_hash = set()
+rtt_info: Dict[tuple, RTT_Info] = dict()
 unfetch_hash = set()
 
 
@@ -70,10 +87,9 @@ def process_download(sock, chunkfile, outputfile):
             if not line:
                 break
             _, hash_str = line.split(" ")
-            required_hash.add(hash_str)
             unfetch_hash.add(hash_str)
     peer_list = config.peers
-    for hash_str in required_hash:
+    for hash_str in unfetch_hash:
         whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
         whohas_pkt = whohas_header + hash_str.encode()
         for p in peer_list:
@@ -85,6 +101,8 @@ def process_inbound_udp(sock):
     # Receive pkt
     pkt, from_addr = sock.recvfrom(BUF_SIZE)
     magic, team, type_code, hlen, plen, seq, ack = struct.unpack(FORMAT, pkt[:HEADER_LEN])
+    if magic != MAGIC:
+        return
     data = pkt[HEADER_LEN:]
     if type_code == 0:
         chunk_hash = data.decode()
@@ -92,7 +110,6 @@ def process_inbound_udp(sock):
             ihave_header = struct.pack(FORMAT, MAGIC, TEAM, 1, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
             ihave_pkt = ihave_header + chunk_hash.encode()
             sock.sendto(ihave_pkt, from_addr)
-            handshake_time[from_addr] = time()
     elif type_code == 1:
         chunk_hash = data.decode()
         if chunk_hash not in hash_peer_list:
@@ -106,16 +123,9 @@ def process_inbound_udp(sock):
             return
         record = Ack_Record()
         record.sending_chunk_hash = sending_chunk_hash
-        sample_rtt = time() - handshake_time[from_addr]
-        record.estimated_RTT = sample_rtt
-        record.dev_RTT = abs(sample_rtt - record.estimated_RTT)
-        if config.timeout == 0:
-            record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
-        else:
-            record.timeout_interval = config.timeout
+        record.next_seq_num = 2
         ack_records[from_addr] = record
         send_data(sock, from_addr, 1)
-        record.next_seq_num = 2
     elif type_code == 3:
         process_data(sock, from_addr, data, seq)
     elif type_code == 4:
@@ -130,7 +140,10 @@ def process_inbound_udp(sock):
 
 
 def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
-    record = data_info[addr]
+    record = data_info.get(addr)
+    if record is None:
+        return
+    record.last_receive_time = time()
     if seq not in record.received_pkt:
         record.buffer[seq] = data
         record.received_pkt.add(seq)
@@ -142,6 +155,7 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
             with open(config.output_file, "wb") as wf:
                 pickle.dump(config.haschunks, wf)
+            del data_info[addr]
     pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
 
@@ -156,6 +170,7 @@ def send_get(sock: simsocket.SimSocket):
             get_header = struct.pack(FORMAT, MAGIC, TEAM, 2, HEADER_LEN, HEADER_LEN + len(chunk_hash), 0, 0)
             sock.sendto(get_header + chunk_hash.encode(), addr)
             data_info[addr] = Data_Info()
+            data_info[addr].last_receive_time = time()
             data_info[addr].downloading_chunk_hash = chunk_hash
             unfetch_hash.remove(chunk_hash)
 
@@ -171,16 +186,18 @@ def send_data(sock: simsocket.SimSocket, addr: tuple, seq: int):
     if ack_records[addr].transfer_num.get(seq) is None:
         ack_records[addr].transfer_num[seq] = 0
     ack_records[addr].transfer_num[seq] += 1
+    ack_records[addr].max_seq = max(ack_records[addr].max_seq, seq)
     sock.sendto(data_header + next_data, addr)
 
 
 def timeout_retransmission(sock: simsocket.SimSocket):
     for addr in ack_records:
         record = ack_records[addr]
+        timeout_interval = rtt_info[addr].timeout_interval if rtt_info[addr].timeout_interval is not None else 10
         for seq in list(record.sending_time.keys()):
             if seq <= record.ack:
                 del record.sending_time[seq]
-            elif time() - record.sending_time[seq] > record.timeout_interval:
+            elif time() - record.sending_time[seq] > timeout_interval:
                 record.ssthresh = max(math.floor(record.cwnd / 2), 2)
                 record.cwnd = 1
                 record.mode = 0
@@ -191,16 +208,15 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
     record = ack_records.get(addr)
     if record is None:
         return
+    if seq > record.max_seq:
+        return
     if record.ack * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
         ack_records.pop(addr)
         return
     record.ack_packet.add(seq)
     if record.transfer_num[seq] == 1:
         sample_rtt = time() - record.sending_time[seq]
-        record.estimated_RTT = (1 - ALPHA) * record.estimated_RTT + ALPHA * sample_rtt
-        record.dev_RTT = (1 - BETA) * record.dev_RTT + BETA * abs(sample_rtt - record.estimated_RTT)
-        if config.timeout == 0:
-            record.timeout_interval = record.estimated_RTT + 4 * record.dev_RTT
+        rtt_info[addr].update_info(sample_rtt)
     if seq in record.sending_time:
         del record.sending_time[seq]
     if ack > record.ack:
@@ -226,6 +242,25 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
             send_data(sock, addr, record.ack + 1)
 
 
+def handle_crash():
+    for addr in list(ack_records.keys()):
+        record = ack_records[addr]
+        flag = True
+        for seq in record.transfer_num.keys():
+            if record.transfer_num[seq] < 3:
+                flag = False
+                break
+        if len(record.transfer_num) > 0 and flag:
+            del ack_records[addr]
+    for addr in list(data_info.keys()):
+        record = data_info[addr]
+        timeout = 20 if rtt_info[addr].timeout_interval is None else 2 * rtt_info[addr].timeout_interval
+        if time() - record.last_receive_time > timeout:
+            chunk_hash = data_info[addr].downloading_chunk_hash
+            unfetch_hash.add(chunk_hash)
+            hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
+            del data_info[addr]
+
 def process_user_input(sock):
     command, chunkf, outf = input().split(' ')
     if command == 'DOWNLOAD':
@@ -237,7 +272,11 @@ def process_user_input(sock):
 def peer_run(config):
     addr = (config.ip, config.port)
     sock = simsocket.SimSocket(config.identity, addr, verbose=config.verbose)
-
+    peer_list = config.peers
+    for p in peer_list:
+        if int(p[0]) != config.identity:
+            rtt_info[(p[1], int(p[2]))] = RTT_Info()
+            rtt_info[(p[1], int(p[2]))].timeout_interval = config.timeout
     try:
         while True:
             ready = select.select([sock, sys.stdin], [], [], 0.1)
@@ -252,6 +291,7 @@ def peer_run(config):
                 pass
             timeout_retransmission(sock)
             send_get(sock)
+            handle_crash()
     except KeyboardInterrupt:
         pass
     finally:
@@ -274,7 +314,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', type=int, help='<maxconn>      Max # of concurrent sending')
     parser.add_argument('-i', type=int, help='<identity>     Which peer # am I?')
     parser.add_argument('-v', type=int, help='verbose level', default=0)
-    parser.add_argument('-t', type=int, help="pre-defined timeout", default=0)
+    parser.add_argument('-t', type=int, help="pre-defined timeout", default=None)
     args = parser.parse_args()
 
     config = bt_utils.BtConfig(args)
