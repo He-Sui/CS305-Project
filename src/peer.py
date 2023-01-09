@@ -5,7 +5,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import select
 import util.simsocket as simsocket
 import struct
-import socket
 import math
 import util.bt_utils as bt_utils
 import hashlib
@@ -80,6 +79,7 @@ rtt_info: Dict[tuple, RTT_Info] = dict()
 received_hash = dict()
 unfetch_hash = set()
 target_hash = set()
+last_who_has = None
 
 
 def process_download(sock, chunkfile, outputfile):
@@ -94,13 +94,7 @@ def process_download(sock, chunkfile, outputfile):
             _, hash_str = line.split(" ")
             target_hash.add(hash_str)
             unfetch_hash.add(hash_str)
-    peer_list = config.peers
-    for hash_str in unfetch_hash:
-        whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
-        whohas_pkt = whohas_header + hash_str.encode()
-        for p in peer_list:
-            if int(p[0]) != config.identity:
-                sock.sendto(whohas_pkt, (p[1], int(p[2])))
+    send_whohas(sock)
 
 
 def process_inbound_udp(sock):
@@ -215,6 +209,20 @@ def timeout_retransmission(sock: simsocket.SimSocket):
                 send_data(sock, addr, seq)
 
 
+def send_whohas(sock: simsocket):
+    global last_who_has
+    peer_list = config.peers
+    if last_who_has is None or time() - last_who_has > 10:
+        last_who_has = time()
+        for hash_str in unfetch_hash:
+            if hash_peer_list.get(hash_str) is None:
+                whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
+                whohas_pkt = whohas_header + hash_str.encode()
+                for p in peer_list:
+                    if int(p[0]) != config.identity:
+                        sock.sendto(whohas_pkt, (p[1], int(p[2])))
+
+
 def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
     record = ack_records.get(addr)
     if record is None:
@@ -306,6 +314,7 @@ def peer_run(config):
             timeout_retransmission(sock)
             send_get(sock)
             handle_crash()
+            send_whohas(sock)
             global downloading
             if len(target_hash) == len(received_hash) and downloading:
                 downloading = False
