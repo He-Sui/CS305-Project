@@ -210,6 +210,8 @@ def timeout_retransmission(sock: simsocket.SimSocket):
 
 
 def send_whohas(sock: simsocket):
+    if len(unfetch_hash) is 0:
+        return
     global last_who_has
     peer_list = config.peers
     if last_who_has is None or time() - last_who_has > 10:
@@ -314,7 +316,7 @@ def peer_run(config):
             timeout_retransmission(sock)
             send_get(sock)
             handle_crash()
-            send_whohas(sock)
+            # send_whohas(sock)
             global downloading
             if len(target_hash) == len(received_hash) and downloading:
                 downloading = False
