@@ -26,6 +26,7 @@ ALPHA = 0.125
 BETA = 0.25
 
 config = None
+downloading = False
 
 
 class RTT_Info:
@@ -76,10 +77,14 @@ ack_records: Dict[tuple, Ack_Record] = dict()
 data_info: Dict[tuple, Data_Info] = dict()
 hash_peer_list: Dict[str, deque] = dict()
 rtt_info: Dict[tuple, RTT_Info] = dict()
+received_hash = dict()
 unfetch_hash = set()
+target_hash = set()
 
 
 def process_download(sock, chunkfile, outputfile):
+    global downloading
+    downloading = True
     config.output_file = outputfile
     with open(chunkfile, 'r') as cf:
         while True:
@@ -87,6 +92,7 @@ def process_download(sock, chunkfile, outputfile):
             if not line:
                 break
             _, hash_str = line.split(" ")
+            target_hash.add(hash_str)
             unfetch_hash.add(hash_str)
     peer_list = config.peers
     for hash_str in unfetch_hash:
@@ -153,8 +159,7 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             del record.buffer[record.ack]
         if len(record.received_chunk) == CHUNK_DATA_SIZE:
             config.haschunks[record.downloading_chunk_hash] = record.received_chunk
-            with open(config.output_file, "wb") as wf:
-                pickle.dump(config.haschunks, wf)
+            received_hash[record.downloading_chunk_hash] = record.received_chunk
             del data_info[addr]
     pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
@@ -247,6 +252,8 @@ def handle_crash():
         record = ack_records[addr]
         flag = True
         for seq in record.transfer_num.keys():
+            if seq > record.ack + math.floor(record.cwnd):
+                continue
             if record.transfer_num[seq] < 3:
                 flag = False
                 break
@@ -260,6 +267,7 @@ def handle_crash():
             unfetch_hash.add(chunk_hash)
             hash_peer_list[chunk_hash].append(hash_peer_list[chunk_hash].popleft())
             del data_info[addr]
+
 
 def process_user_input(sock):
     command, chunkf, outf = input().split(' ')
@@ -292,6 +300,12 @@ def peer_run(config):
             timeout_retransmission(sock)
             send_get(sock)
             handle_crash()
+            global downloading
+            if len(target_hash) == len(received_hash) and downloading:
+                downloading = False
+                with open(config.output_file, "wb") as wf:
+                    pickle.dump(received_hash, wf)
+
     except KeyboardInterrupt:
         pass
     finally:
