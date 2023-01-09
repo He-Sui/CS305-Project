@@ -277,7 +277,7 @@ def handle_crash():
             del ack_records[addr]
     for addr in list(data_info.keys()):
         record = data_info[addr]
-        timeout = 20 if rtt_info[addr].timeout_interval is None else 2 * rtt_info[addr].timeout_interval
+        timeout = 10 if rtt_info[addr].timeout_interval is None else rtt_info[addr].timeout_interval
         if time() - record.last_receive_time > timeout:
             chunk_hash = data_info[addr].downloading_chunk_hash
             unfetch_hash.add(chunk_hash)
@@ -316,7 +316,7 @@ def peer_run(config):
             timeout_retransmission(sock)
             send_get(sock)
             handle_crash()
-            # send_whohas(sock)
+            send_whohas(sock)
             global downloading
             if len(target_hash) == len(received_hash) and downloading:
                 downloading = False
