@@ -158,8 +158,14 @@ def process_data(sock: simsocket.SimSocket, addr: tuple, data: bytes, seq: int):
             record.received_chunk += record.buffer[record.ack]
             del record.buffer[record.ack]
         if len(record.received_chunk) == CHUNK_DATA_SIZE:
-            config.haschunks[record.downloading_chunk_hash] = record.received_chunk
-            received_hash[record.downloading_chunk_hash] = record.received_chunk
+            sha1 = hashlib.sha1()
+            sha1.update(record.received_chunk)
+            received_chunk_hash_str = sha1.hexdigest()
+            if received_chunk_hash_str == record.downloading_chunk_hash:
+                config.haschunks[record.downloading_chunk_hash] = record.received_chunk
+                received_hash[record.downloading_chunk_hash] = record.received_chunk
+            else:
+                unfetch_hash.add(record.downloading_chunk_hash)
             del data_info[addr]
     pkt = struct.pack(FORMAT, MAGIC, TEAM, 4, HEADER_LEN, HEADER_LEN, seq, record.ack)
     sock.sendto(pkt, addr)
