@@ -5,6 +5,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import select
 import util.simsocket as simsocket
 import struct
+import shutil
 import math
 import logging
 import util.bt_utils as bt_utils
@@ -72,8 +73,8 @@ class Ack_Record:
         file = logging.FileHandler(filename=filename, mode='a', encoding='utf-8')
         fmt = logging.Formatter(fmt='[%(asctime)s] [%(levelname)s] >>>  %(message)s', datefmt='%Y-%m-%d %I:%M:%S')
         file.setFormatter(fmt)
-        logger = logging.Logger(name="PEER WINSIZE LOGGER", level=logging.INFO)
-        logger.addHandler(file)
+        self.logger = logging.Logger(name="PEER WINSIZE LOGGER", level=logging.INFO)
+        self.logger.addHandler(file)
 
 
 class Data_Info:
@@ -139,6 +140,7 @@ def process_inbound_udp(sock):
         record.sending_chunk_hash = sending_chunk_hash
         record.next_seq_num = 2
         ack_records[from_addr] = record
+        log_record("CREATE", record)
         send_data(sock, from_addr, 1)
     elif type_code == 3:
         process_data(sock, from_addr, data, seq)
@@ -219,6 +221,7 @@ def timeout_retransmission(sock: simsocket.SimSocket):
             elif time() - record.sending_time[seq] > timeout_interval:
                 record.ssthresh = max(math.floor(record.cwnd / 2), 2)
                 record.cwnd = 1
+                log_record("UPDATE", record)
                 record.mode = 0
                 send_data(sock, addr, seq)
 
@@ -259,10 +262,12 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         record.duplicated_ack = 0
         if record.mode == 0:
             record.cwnd += 1
+            log_record("UPDATE", record)
             if record.mode >= record.ssthresh:
                 record.mode = 1
         else:
             record.cwnd += 1 / record.cwnd
+            log_record("UPDATE", record)
         for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
             if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
                 break
@@ -273,6 +278,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         if record.duplicated_ack == 3:
             record.ssthresh = max(math.floor(record.cwnd / 2), 2)
             record.cwnd = 1
+            log_record("UPDATE", record)
             record.mode = 0
             send_data(sock, addr, record.ack + 1)
 
@@ -305,6 +311,11 @@ def process_user_input(sock):
         process_download(sock, chunkf, outf)
     else:
         pass
+
+
+def log_record(method: str, record: Ack_Record):
+    msg = method.upper() + " WINSIZE " + str(math.floor(record.cwnd))
+    record.logger.info(msg)
 
 
 def peer_run(config):
@@ -363,6 +374,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     ID = args.i
+    shutil.rmtree('log')
 
     config = bt_utils.BtConfig(args)
     peer_run(config)
