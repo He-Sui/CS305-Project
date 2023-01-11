@@ -28,7 +28,7 @@ def handle_log(path):
         split = info.split(" -+- ")
         time_cnt = handle_log_time(split[0])
         msg = split[-1].replace("\n", "").split(" ")
-        winsize = int(msg[-1])
+        winsize = float(msg[-1])
         if i == 0:
             start = time_cnt
         if i == len(infos) - 1:
@@ -54,6 +54,8 @@ for d in dirs:
     peer_dir = os.path.join(dirname, d)
     if os.path.isdir(peer_dir):
         for log in os.listdir(peer_dir):
+            if log.endswith(".png"):
+                continue
             fig_name = log.replace(".log", "") + '.png'
             fig_path = os.path.join(peer_dir, fig_name)
             log_path = os.path.join(peer_dir, log)
