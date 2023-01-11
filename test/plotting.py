@@ -28,7 +28,7 @@ def handle_log(path):
         split = info.split(" -+- ")
         time_cnt = handle_log_time(split[0])
         msg = split[-1].replace("\n", "").split(" ")
-        winsize = int(msg[-1])
+        winsize = float(msg[-1])
         if i == 0:
             start = time_cnt
         if i == len(infos) - 1:

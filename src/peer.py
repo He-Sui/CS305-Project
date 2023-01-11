@@ -317,7 +317,7 @@ def process_user_input(sock):
 
 
 def log_record(method: str, record: Ack_Record):
-    msg = method.upper() + " WINSIZE " + str(math.floor(record.cwnd))
+    msg = method.upper() + " WINSIZE " + str(round(record.cwnd, 4))
     record.logger.info(msg)
 
 
