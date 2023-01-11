@@ -65,15 +65,13 @@ class Ack_Record:
         self.transfer_num: Dict[int, int] = dict()
         self.next_seq_num = 1
         dirname = "log/peer{}".format(ID)
-        if not os.path.exists('log'):
-            os.makedirs('log')
         if not os.path.exists(dirname):
             os.makedirs(dirname)
         filename = os.path.join(dirname, self.addr)
         file = logging.FileHandler(filename=filename, mode='a', encoding='utf-8')
-        fmt = logging.Formatter(fmt='[%(asctime)s] [%(levelname)s] >>>  %(message)s', datefmt='%Y-%m-%d %I:%M:%S')
+        fmt = logging.Formatter(fmt="%(asctime)s -+- %(name)s -+- %(levelname)s -+- %(message)s")
         file.setFormatter(fmt)
-        self.logger = logging.Logger(name="PEER WINSIZE LOGGER", level=logging.INFO)
+        self.logger = logging.Logger(name="PEER WINSIZE LOGGER", level=logging.DEBUG)
         self.logger.addHandler(file)
 
 
@@ -374,7 +372,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     ID = args.i
-    shutil.rmtree('log')
+    if not os.path.exists('log'):
+        os.makedirs('log')
 
     config = bt_utils.BtConfig(args)
     peer_run(config)
