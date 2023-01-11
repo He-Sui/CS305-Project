@@ -5,7 +5,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import select
 import util.simsocket as simsocket
 import struct
-import shutil
 import math
 import logging
 import util.bt_utils as bt_utils
@@ -261,7 +260,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         if record.mode == 0:
             record.cwnd += 1
             log_record("UPDATE", record)
-            if record.mode >= record.ssthresh:
+            if record.cwnd >= record.ssthresh:
                 record.mode = 1
         else:
             record.cwnd += 1 / record.cwnd
