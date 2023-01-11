@@ -6,6 +6,7 @@ import select
 import util.simsocket as simsocket
 import struct
 import math
+import logging
 import util.bt_utils as bt_utils
 import hashlib
 import argparse
@@ -23,6 +24,7 @@ MAGIC = 52305
 TEAM = 15
 ALPHA = 0.125
 BETA = 0.25
+ID = None
 
 config = None
 downloading = False
@@ -48,7 +50,8 @@ class RTT_Info:
 
 
 class Ack_Record:
-    def __init__(self):
+    def __init__(self, addr):
+        self.addr = str(addr) + '.log'
         self.ack = 0
         self.sending_chunk_hash = ''
         self.sending_time = dict()
@@ -60,6 +63,17 @@ class Ack_Record:
         self.duplicated_ack = 0
         self.transfer_num: Dict[int, int] = dict()
         self.next_seq_num = 1
+        dirname = "log/peer{}".format(ID)
+        if not os.path.exists('log'):
+            os.makedirs('log')
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        filename = os.path.join(dirname, self.addr)
+        file = logging.FileHandler(filename=filename, mode='a', encoding='utf-8')
+        fmt = logging.Formatter(fmt='[%(asctime)s] [%(levelname)s] >>>  %(message)s', datefmt='%Y-%m-%d %I:%M:%S')
+        file.setFormatter(fmt)
+        logger = logging.Logger(name="PEER WINSIZE LOGGER", level=logging.INFO)
+        logger.addHandler(file)
 
 
 class Data_Info:
@@ -121,7 +135,7 @@ def process_inbound_udp(sock):
             denied_header = struct.pack(FORMAT, MAGIC, TEAM, 5, HEADER_LEN, HEADER_LEN + len(sending_chunk_hash), 0, 0)
             sock.sendto(denied_header + sending_chunk_hash.encode(), from_addr)
             return
-        record = Ack_Record()
+        record = Ack_Record(from_addr)
         record.sending_chunk_hash = sending_chunk_hash
         record.next_seq_num = 2
         ack_records[from_addr] = record
@@ -210,7 +224,7 @@ def timeout_retransmission(sock: simsocket.SimSocket):
 
 
 def send_whohas(sock: simsocket):
-    if len(unfetch_hash) is 0:
+    if len(unfetch_hash) == 0:
         return
     global last_who_has
     peer_list = config.peers
@@ -347,6 +361,8 @@ if __name__ == '__main__':
     parser.add_argument('-v', type=int, help='verbose level', default=0)
     parser.add_argument('-t', type=int, help="pre-defined timeout", default=None)
     args = parser.parse_args()
+
+    ID = args.i
 
     config = bt_utils.BtConfig(args)
     peer_run(config)
