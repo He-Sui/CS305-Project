@@ -54,6 +54,8 @@ for d in dirs:
     peer_dir = os.path.join(dirname, d)
     if os.path.isdir(peer_dir):
         for log in os.listdir(peer_dir):
+            if log.endswith(".png"):
+                continue
             fig_name = log.replace(".log", "") + '.png'
             fig_path = os.path.join(peer_dir, fig_name)
             log_path = os.path.join(peer_dir, log)
