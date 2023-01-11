@@ -210,7 +210,7 @@ def timeout_retransmission(sock: simsocket.SimSocket):
 
 
 def send_whohas(sock: simsocket):
-    if len(unfetch_hash) is 0:
+    if len(unfetch_hash) == 0:
         return
     global last_who_has
     peer_list = config.peers
