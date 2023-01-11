@@ -63,7 +63,13 @@ class Ack_Record:
         self.duplicated_ack = 0
         self.transfer_num: Dict[int, int] = dict()
         self.next_seq_num = 1
-        dirname = "log/peer{}".format(ID)
+        dirname = 'log'
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        dirname = os.path.join(dirname, 'plotting')
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        dirname = os.path.join(dirname, "peer{}".format(ID))
         if not os.path.exists(dirname):
             os.makedirs(dirname)
         filename = os.path.join(dirname, self.addr)
