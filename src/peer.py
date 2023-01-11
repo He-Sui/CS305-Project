@@ -245,23 +245,36 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         record.duplicated_ack = 0
         if record.mode == 0:
             record.cwnd += 1
-            if record.mode >= record.ssthresh:
+            if record.cwnd >= record.ssthresh:
                 record.mode = 1
-        else:
+        elif record.mode == 1:
             record.cwnd += 1 / record.cwnd
-        for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
-            if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
-                break
-            record.next_seq_num += 1
-            send_data(sock, addr, i)
+        else:
+            record.cwnd = record.ssthresh
+            record.duplicated_ack = 0
+        if record.mode != 2:
+            for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
+                if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
+                    break
+                record.next_seq_num += 1
+                send_data(sock, addr, i)
+        else:
+            record.mode = 1
     elif ack == record.ack:
-        record.duplicated_ack += 1
-        if record.duplicated_ack == 3:
-            record.ssthresh = max(math.floor(record.cwnd / 2), 2)
-            record.cwnd = 1
-            record.mode = 0
-            send_data(sock, addr, record.ack + 1)
-
+        if record.mode == 2:
+            record.cwnd += 1
+            for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
+                if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
+                    break
+                record.next_seq_num += 1
+                send_data(sock, addr, i)
+        else:
+            record.duplicated_ack += 1
+            if record.duplicated_ack == 3:
+                record.ssthresh = max(math.floor(record.cwnd / 2), 2)
+                record.cwnd = record.ssthresh + 3
+                record.mode = 2
+                send_data(sock, addr, record.ack + 1)
 
 def handle_crash():
     for addr in list(ack_records.keys()):
