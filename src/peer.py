@@ -245,7 +245,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         record.duplicated_ack = 0
         if record.mode == 0:
             record.cwnd += 1
-            if record.mode >= record.ssthresh:
+            if record.cwnd >= record.ssthresh:
                 record.mode = 1
         else:
             record.cwnd += 1 / record.cwnd
