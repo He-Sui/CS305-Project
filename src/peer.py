@@ -222,7 +222,7 @@ def timeout_retransmission(sock: simsocket.SimSocket):
         record = ack_records[addr]
         timeout_interval = rtt_info[addr].timeout_interval if rtt_info[addr].timeout_interval is not None else 10
         for seq in list(record.sending_time.keys()):
-            if seq <= record.ack:
+            if seq in record.ack_packet:
                 del record.sending_time[seq]
             elif time() - record.sending_time[seq] > timeout_interval:
                 record.ssthresh = max(math.floor(record.cwnd / 2), 2)
@@ -238,15 +238,14 @@ def send_whohas(sock: simsocket):
         return
     global last_who_has
     peer_list = config.peers
-    if last_who_has is None or time() - last_who_has > 10:
+    if last_who_has is None or time() - last_who_has > 60:
         last_who_has = time()
         for hash_str in unfetch_hash:
-            if hash_peer_list.get(hash_str) is None:
-                whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
-                whohas_pkt = whohas_header + hash_str.encode()
-                for p in peer_list:
-                    if int(p[0]) != config.identity:
-                        sock.sendto(whohas_pkt, (p[1], int(p[2])))
+            whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
+            whohas_pkt = whohas_header + hash_str.encode()
+            for p in peer_list:
+                if int(p[0]) != config.identity:
+                    sock.sendto(whohas_pkt, (p[1], int(p[2])))
 
 
 def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
@@ -278,7 +277,6 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
         else:
             record.cwnd = record.ssthresh
             log_record("UPDATE", record)
-            record.duplicated_ack = 0
             record.mode = 1
         for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
             if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
