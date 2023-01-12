@@ -240,12 +240,13 @@ def send_whohas(sock: simsocket):
     peer_list = config.peers
     if last_who_has is None or time() - last_who_has > 60:
         last_who_has = time()
-        for hash_str in unfetch_hash:
-            whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
-            whohas_pkt = whohas_header + hash_str.encode()
-            for p in peer_list:
-                if int(p[0]) != config.identity:
-                    sock.sendto(whohas_pkt, (p[1], int(p[2])))
+        for hash_str in target_hash:
+            if hash_str not in received_hash:
+                whohas_header = struct.pack(FORMAT, MAGIC, TEAM, 0, HEADER_LEN, HEADER_LEN + len(hash_str), 0, 0)
+                whohas_pkt = whohas_header + hash_str.encode()
+                for p in peer_list:
+                    if int(p[0]) != config.identity:
+                        sock.sendto(whohas_pkt, (p[1], int(p[2])))
 
 
 def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
