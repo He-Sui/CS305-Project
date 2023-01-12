@@ -2,16 +2,16 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-import select
-import util.simsocket as simsocket
-import struct
 import math
+import pickle
+import select
+import struct
 import logging
-import util.bt_utils as bt_utils
 import hashlib
 import argparse
-import pickle
-from typing import Dict, Set, Tuple
+import util.bt_utils as bt_utils
+import util.simsocket as simsocket
+from typing import Dict
 from time import time
 from collections import deque
 
@@ -339,7 +339,7 @@ def peer_run(config):
                 if sys.stdin in read_ready:
                     process_user_input(sock)
             else:
-                # No pkt nor input arrives during this period 
+                # No pkt nor input arrives during this period
                 pass
             timeout_retransmission(sock)
             send_get(sock)
