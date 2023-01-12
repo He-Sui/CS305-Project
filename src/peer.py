@@ -274,6 +274,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
                 record.mode = 1
         elif record.mode == 1:
             record.cwnd += 1 / record.cwnd
+            log_record("UPDATE", record)
         else:
             record.cwnd = record.ssthresh
             log_record("UPDATE", record)
@@ -287,6 +288,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
     elif ack == record.ack:
         if record.mode == 2:
             record.cwnd += 1
+            log_record("UPDATE", record)
             for i in range(record.next_seq_num, record.ack + math.floor(record.cwnd) + 2):
                 if (i - 1) * MAX_PAYLOAD >= CHUNK_DATA_SIZE:
                     break
@@ -297,6 +299,7 @@ def process_ack(sock: simsocket.SimSocket, addr: tuple, seq: int, ack: int):
             if record.duplicated_ack == 3:
                 record.ssthresh = max(math.floor(record.cwnd / 2), 2)
                 record.cwnd = record.ssthresh + 3
+                log_record("UPDATE", record)
                 record.mode = 2
                 send_data(sock, addr, record.ack + 1)
 
